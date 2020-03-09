@@ -297,9 +297,11 @@ void D2SaveEditor::SetCheckSum()
 	*(DWORD*)(characterBuffer + CHECKSUM_INDEX) = checksum;
 }
 
+//#define SKIP_ERROR_CHECK_SAVE
 //Save the changes to the file in the directory specified by currentFilePath.
 bool D2SaveEditor::SaveToFile()
 {
+#ifndef SKIP_ERROR_CHECK_SAVE
 	if (!changesToSave)
 	{
 		return true;
@@ -321,6 +323,8 @@ bool D2SaveEditor::SaveToFile()
 			cout << endl;
 		} while (!ChangeName(unsetName));
 	}
+#endif // !SKIP_ERROR_CHECK_SAVE
+	//AA
 	int startingIndex = currentFilePath.find_last_of('\\') + 1;
 	if (startingIndex == string::npos)
 	{
@@ -342,5 +346,163 @@ bool D2SaveEditor::SaveToFile()
 
 	outputFile = NULL;
 	changesToSave = false;
+	FindStatsDisplay();
+	return true;
+}
+
+// Strength, Energy, Dexterity, Vitality are stored as 13 bit values in the save file. Can be higher than that in game, but not in the save file.
+// FF 5F -> 1111 1111 0101 1111 -> 1111 1111 ???1 1111 = 13 bits. Pretty sure the ? is part of a code identifying the stat. Least significant byte
+// first. Pretty sure it's 8 bits for  the stat id itself.
+// 5F 60 -> 0101 1111 0110 0000 -> ???1 1111 011? ???? -> the question marks are where the bits for the stat id are I think.
+// Actually, based on strength, I think it is 9 bit for the stat id.
+// 00 FF FE
+// 11 Bytes for strength, energy, dexterity, and vitality.
+// Strength = 0
+// Energy = 1
+// Dexterity = 10
+// Vitality = 11
+// 00        FE        7F        80        FF        2F        E0        FF        0F        F8        FF -> every stat at cap of 8191.
+// 0000 0000 1111 1110 0111 1111 1000 0000 1111 1111 0010 1111 1110 0000 1111 1111 0000 1111 1111 1000 1111 1111
+// ???? ???? 1111 111? ??11 1111 1??? ???? 1111 1111 ???? 1111 111? ???? 1111 1111 ???? ??11 1111 1??? 1111 1111
+bool D2SaveEditor::FindStatsDisplay()
+{
+	int index = HEADER_SIZE;
+	for (; characterBuffer[index] != 'g' || characterBuffer[index + 1] != 'f'; index++)
+	{
+
+	}
+	index += 2;
+	int maxIndex;
+	for (maxIndex = index; characterBuffer[maxIndex] != 'i' || characterBuffer[maxIndex + 1] != 'f'; maxIndex++)
+	{
+
+	}
+	long long section = 0;
+	int shifted = 0;
+	// Assigns 1111 1111 0000 0000 0010 1111 1111 1111 1000 0000 0111 1111 1111 1110 0000 0000 -> Reverse order of above order.
+	section = *(long long*)(characterBuffer + index);
+	
+	for (int i = 0; i < 16 && index < maxIndex; i++)
+	{
+		if (shifted > 8)
+		{
+			index += shifted / 8;
+			shifted %= 8;
+			section = *(long long*)(characterBuffer + index);
+			section >>= shifted;
+		}
+		string outputString = "";
+		int shift = 0;
+		int idShift = STAT_ID_SIZE;
+		int characteristicMask = 0;
+		//This should be a dictionary.
+		switch (section & STAT_ID_MASK)
+		{
+			case 0:
+				outputString = "Strength: ";
+				break;
+			case 1:
+				outputString = "Energy: ";
+				break;
+			case 2:
+				outputString = "Dexterity: ";
+				break;
+			case 3:
+				outputString = "Vitality: ";
+				break;
+			case 4:
+				outputString = "Stat Points: ";
+				break;
+			case 5:
+				outputString = "Skill Points: ";
+				break;
+			case 6:
+				outputString = "Current Health: ";
+				break;
+			case 7:
+				outputString = "Base Maximum Health: ";
+				break;
+			case 8:
+				outputString = "Current Mana: ";
+				break;
+			case 9:
+				outputString = "Base Maximum Mana: ";
+				break;
+			case 10:
+				outputString = "Current Stamina: ";
+				break;
+			case 11:
+				outputString = "Base Maximum Stamina: ";
+			case 12:
+				outputString = "Level: ";
+				break;
+			case 13:
+				outputString = "Experience: ";
+				break;
+			case 14:
+				outputString = "Inventory Gold: ";
+				break;
+			case 15:
+				outputString = "Stash Gold: ";
+				break;
+			default:
+				break;
+		}
+		switch (section & STAT_ID_MASK)
+		{
+			case 1:
+			case 2:
+			case 3:
+			case 0:
+				characteristicMask = STAT_MASK;
+				shift = STAT_SIZE;
+				break;
+				//Stat Points. Stored as 11 bits.
+			case 4:
+				characteristicMask = STAT_POINT_MASK;
+				shift = STAT_POINT_SIZE;
+				break;
+			case 5:
+				characteristicMask = SKILL_POINT_MASK;
+				shift = SKILL_POINT_SIZE;
+				break;
+			case 11:
+			case 10:
+			case 9:
+			case 8:
+			case 7:
+			case 6:
+				//This is a fixed point number for some reason. It has 8 practically pointless bits, so they are removed.
+				characteristicMask = CURRENT_HEALTH_MASK >> 8;
+				shift = CURRENT_HEALTH_SIZE - 8;
+				section >>= 8;
+				shifted += 8;
+				break;
+			case 12:
+				characteristicMask = LEVEL_MASK;
+				shift = LEVEL_SIZE;
+				break;
+			case 13:
+				characteristicMask = EXPERIENCE_MASK;
+				shift = EXPERIENCE_SIZE;
+				break;
+			case 15:
+			case 14:
+				characteristicMask = GOLD_MASK;
+				shift = GOLD_SIZE;
+				break;
+		default:
+			break;
+		}
+		if (outputString != "")
+		{
+			section >>= idShift;
+			shifted += idShift;
+			cout << outputString << (section & characteristicMask) << "    Index: " << index << "     Shifted: " << shifted << endl;
+			section >>= shift;
+			shifted += shift;
+		}
+	}
+
 	return true;
 }
