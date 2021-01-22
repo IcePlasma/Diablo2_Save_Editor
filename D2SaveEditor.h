@@ -19,7 +19,7 @@
 #define CURRENT_HEALTH_MASK 0x1FFFFF
 #define LEVEL_MASK 0xFF
 #define EXPERIENCE_MASK 0xFFFFFF
-#define GOLD_MASK 0x1FFFFFF
+#define GOLD_MASK 0x3FFFFF
 #define CHECKSUM_INDEX 12
 #define CLASS_INDEX 40
 #define LEVEL_INDEX 43
@@ -44,7 +44,9 @@
 #define READ_NEW_FILE_PROMPT 5
 #define EDIT_STAT_PROMPT 6
 #define DISP_STAT_PROMPT 7
-#define QUIT_PROMPT 8
+#define MAX_STATS_PROMPT 8
+#define MAX_SKILLS_PROMPT 9
+#define QUIT_PROMPT 10
 
 #define STRENGTH_ID 0
 #define ENERGY_ID 1
@@ -62,6 +64,9 @@
 #define EXPERIENCE_ID 13
 #define INVENTORY_GOLD_ID 14
 #define STASH_GOLD_ID 15
+
+#define MAX_STASH_GOLD 2500000
+#define MAX_INVENTORY_GOLD 1500000
 #include <Windows.h>
 #include <iostream>
 #include <fstream>
@@ -168,6 +173,8 @@ private:
 	void ModifyStat(int, int);
 	bool FindStats();
 	bool ChangeStat(int);
+	void MaxAllStats();
+	void MaxAllSkills();
 };
 
 #endif

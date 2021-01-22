@@ -95,15 +95,42 @@ bool D2SaveEditor::ChangeLevel(unsigned int newLevel)
 	return true;
 }
 
+void D2SaveEditor::MaxAllStats()
+{
+	for (int i = 0; i < NUMBER_OF_STATS; i++)
+	{
+		if (i == LEVEL_ID)
+		{
+			i++;
+			continue;
+		}
+		ModifyStat(i, 0xFFFFFF);
+	}
+	ChangeLevel(MAXIMUM_LEVEL);
+}
+
+// Modifies a given stat to be newValue. The given new value is masked to be the correct bit length, so values higher than the maximum will be truncated.
 void D2SaveEditor::ModifyStat(int statID, int newValue)
 {
 	unsigned long long memoryValue = 0;
 	unsigned int statIndex = statID;
 	int shiftAmount = 0;
-	DisplayStatsOrSeek(false, statIndex, shiftAmount);
+	if (!DisplayStatsOrSeek(false, statIndex, shiftAmount))
+	{
+		cout << endl << statIdToString[statID] << " not found in character file. Try raising its value." << endl;
+		return;
+	}
 	if (statID <= BASE_MAX_STAMINA_ID && statID >= CURRENT_HEALTH_ID)
 	{
 		shiftAmount -= 8;
+	}
+	else if (statID == STASH_GOLD_ID && newValue > MAX_STASH_GOLD)
+	{
+		newValue = MAX_STASH_GOLD;
+	}
+	else if (statID == INVENTORY_GOLD_ID && newValue > MAX_INVENTORY_GOLD)
+	{
+		newValue = MAX_INVENTORY_GOLD;
 	}
 	memoryValue = *(long long*)(characterBuffer + statIndex);
 	memoryValue &= (~(statIDToMask[statID] << shiftAmount));
@@ -234,6 +261,12 @@ void D2SaveEditor::DoDecision(int& choice, string& filePath)
 		case DISP_STAT_PROMPT:
 			DisplayStatsOrSeek(true, classChoice, choice);
 			break;
+		case MAX_STATS_PROMPT:
+			MaxAllStats();
+			break;
+		case MAX_SKILLS_PROMPT:
+			MaxAllSkills();
+			break;
 		default:
 			ChoicePrompts(choice);
 			break;
@@ -276,7 +309,9 @@ void D2SaveEditor::ChoicePromptOutput(int& choice)
 		<< SAVE_TO_NEW_FILE_PROMPT << ". Save to New File" << endl
 		<< READ_NEW_FILE_PROMPT << ". Read In a New File" << endl
 		<< EDIT_STAT_PROMPT<< ". Edit Stats (including level, life, gold, etc)" << endl
-		<< DISP_STAT_PROMPT << ". Display all stats." << endl
+		<< DISP_STAT_PROMPT << ". Display All Stats" << endl
+		<< MAX_STATS_PROMPT << ". Maximize All Stats (including level, life, gold, etc)" << endl
+		<< MAX_SKILLS_PROMPT << ". Maximize All Skills" << endl
 		<< QUIT_PROMPT << ". Quit" << endl;
 	cin >> choice;
 }
@@ -456,6 +491,36 @@ bool D2SaveEditor::FindStats()
 	return true;
 }
 
+void D2SaveEditor::MaxAllSkills()
+{
+	if (statStartIndex < HEADER_SIZE)
+	{
+		if (!FindStats())
+		{
+			return;
+		}
+	}
+	changesToSave = true;
+	int skillStartIndex = statEndIndex + 2;
+	int skillEnd;
+	switch (characterBuffer[CLASS_INDEX])
+	{
+		case NECROMANCER:
+		case BARBARIAN:
+		case DRUID:
+			skillEnd = 35;
+			break;
+		default:
+			skillEnd = 36;
+			break;
+	}
+	//necro, barb, druid
+	for (int i = 0; i < skillEnd; i++)
+	{
+		characterBuffer[skillStartIndex + i] = 0x96;
+	}
+}
+
 bool D2SaveEditor::DisplayStatsOrSeek(bool displayStats, unsigned int& statToSeek, int& bitShiftAtIndex)
 {
 	if (statStartIndex < HEADER_SIZE)
@@ -552,5 +617,5 @@ bool D2SaveEditor::DisplayStatsOrSeek(bool displayStats, unsigned int& statToSee
 			shifted += shift;
 		}
 	}
-	return true;
+	return displayStats;
 }
