@@ -3,10 +3,9 @@
 D2SaveEditor::D2SaveEditor()
 {
 	characterBuffer = NULL;
-	fileSize = 0;
-	nameChanged = false;
-	changesToSave = false;
+	ResetDefaults();
 }
+
 D2SaveEditor::~D2SaveEditor()
 {
 	if (characterBuffer != NULL)
@@ -29,8 +28,7 @@ bool D2SaveEditor::ReadFile(string& filePath)
 		delete[] characterBuffer;
 		characterBuffer = NULL;
 	}
-	fileSize = 0;
-	bufferSize = 0;
+	ResetDefaults();
 	ifstream* inputFile = new ifstream(filePath, ios::binary);
 	if (!inputFile->is_open())
 	{
@@ -39,8 +37,6 @@ bool D2SaveEditor::ReadFile(string& filePath)
 		cout << "Error! File path could not be resolved." << endl;
 		return false;
 	}
-	nameChanged = false;
-	changesToSave = false;
 	currentFilePath = filePath;
 
 	inputFile->seekg(0, ios::end);
@@ -57,6 +53,17 @@ bool D2SaveEditor::ReadFile(string& filePath)
 	inputFile = NULL;
 	nameChanged = false;
 	return true;
+}
+
+void D2SaveEditor::ResetDefaults()
+{
+	fileSize = 0;
+	bufferSize = 0;
+	nameChanged = false;
+	changesToSave = false;
+	statStartIndex = 0;
+	statEndIndex = 0;
+	currentFilePath = "";
 }
 
 void D2SaveEditor::RunEditor()
@@ -79,16 +86,29 @@ bool D2SaveEditor::ChangeLevel(unsigned int newLevel)
 		return false;
 	}
 	changesToSave = true;
-	for (int i = HEADER_SIZE; i < fileSize; i++)
-	{
-		if (characterBuffer[i] == characterBuffer[LEVEL_INDEX])
-		{
-			characterBuffer[i] = newLevel;
-			break;
-		}
-	}
 	characterBuffer[LEVEL_INDEX] = newLevel;
+
+	ModifyStat(LEVEL_ID, newLevel);
+	ModifyStat(EXPERIENCE_ID, experienceMinimum[newLevel - 1]);
+
+	DisplayStatsOrSeek(true, newLevel, fileSize);
 	return true;
+}
+
+void D2SaveEditor::ModifyStat(int statID, int newValue)
+{
+	unsigned long long memoryValue = 0;
+	unsigned int statIndex = statID;
+	int shiftAmount = 0;
+	DisplayStatsOrSeek(false, statIndex, shiftAmount);
+	if (statID <= BASE_MAX_STAMINA_ID && statID >= CURRENT_HEALTH_ID)
+	{
+		shiftAmount -= 8;
+	}
+	memoryValue = *(long long*)(characterBuffer + statIndex);
+	memoryValue &= (~(statIDToMask[statID] << shiftAmount));
+	memoryValue |= (((long long)newValue) & statIDToMask[statID]) << shiftAmount;
+	*(long long*)(characterBuffer + statIndex) = memoryValue;
 }
 
 void D2SaveEditor::SavePrompt()
@@ -136,12 +156,29 @@ void D2SaveEditor::ChoicePrompts(int& choice)
 			cout << (string)(characterBuffer + NAME_START) << endl;
 			break;
 		case 4:
+		case 7:
 			break;
 		case 5:
 			cout << filePathPrompt << endl;
 			break;
 		case 6:
-			cout << "What do you want your new level to be?" << endl;
+			cout << "Caution! Only edit stats that show up when displaying the stats for this save. Which stat would you like to edit? " << endl
+				<< STRENGTH_ID << ".    Strength" << endl
+				<< ENERGY_ID << ".    Energy" << endl
+				<< DEXTERITY_ID << ".    Dexterity" << endl
+				<< VITALITY_ID << ".    Vitality" << endl
+				<< STAT_POINTS_ID << ".    Stat Points" << endl
+				<< SKILL_POINTS_ID << ".    Skill Points" << endl
+				<< CURRENT_HEALTH_ID << ".    Current Health" << endl
+				<< BASE_MAX_HEALTH_ID << ".    Max Health" << endl
+				<< CURRENT_MANA_ID << ".    Current Mana" << endl
+				<< BASE_MAX_MANA_ID << ".    Max Mana" << endl
+				<< CURRENT_STAMINA_ID << ".   Current Stamina" << endl
+				<< BASE_MAX_STAMINA_ID << ".   Max Stamina" << endl
+				<< LEVEL_ID << ".   Level" << endl
+				<< EXPERIENCE_ID << ".   Experience Points" << endl
+				<< INVENTORY_GOLD_ID << ".   Gold in Inventory" << endl
+				<< STASH_GOLD_ID << ".   Gold in Stash" << endl;
 			break;
 		default:
 			cout << "Invalid choice entered." << endl;
@@ -154,10 +191,10 @@ void D2SaveEditor::DoDecision(int& choice, string& filePath)
 {
 	string newCharacterName = "";
 	unsigned int classChoice = -1;
-	unsigned int newLevel = -1;
+	unsigned int statChoice = -1;
 	switch (choice)
 	{
-		case 1:
+		case CLASS_CHANGE_PROMPT:
 			do
 			{
 				ChoicePrompts(choice);
@@ -165,7 +202,7 @@ void D2SaveEditor::DoDecision(int& choice, string& filePath)
 				cout << endl;
 			} while (!ChangeClass(classChoice));
 			break;
-		case 2:
+		case CHANGE_NAME_PROMPT:
 			do
 			{
 				ChoicePrompts(choice);
@@ -173,26 +210,29 @@ void D2SaveEditor::DoDecision(int& choice, string& filePath)
 				cout << endl;
 			} while (!ChangeName(newCharacterName));
 			break;
-		case 3:
+		case DISPLAY_NAME_PROMPT:
 			ChoicePrompts(choice);
 			break;
-		case 4:
+		case SAVE_TO_NEW_FILE_PROMPT:
 			SaveToFile();
 			ChoicePrompts(choice);
 			break;
-		case 5:
+		case READ_NEW_FILE_PROMPT:
 			do
 			{
 				cout << filePathPrompt << endl;
 				cin >> filePath;
 			} while (!ReadFile(filePath));
 			break;
-		case 6:
+		case EDIT_STAT_PROMPT:
 			do
 			{
 				ChoicePrompts(choice);
-				cin >> newLevel;
-			} while (!ChangeLevel(newLevel));
+				cin >> statChoice;
+			} while (!ChangeStat(statChoice));
+			break;
+		case DISP_STAT_PROMPT:
+			DisplayStatsOrSeek(true, classChoice, choice);
 			break;
 		default:
 			ChoicePrompts(choice);
@@ -200,16 +240,44 @@ void D2SaveEditor::DoDecision(int& choice, string& filePath)
 	}
 }
 
+bool D2SaveEditor::ChangeStat(int statChoice)
+{
+	if (statChoice > NUMBER_OF_STATS || statChoice < 0)
+	{
+		cout << statChoice << " is an invalid choice. Please select a stat from the provided choices" << endl;
+		return false;
+	}
+
+	int newValue = 0;
+	while (newValue < 1)
+	{
+		cout << endl << "Please enter a new positive value for " << statIdToString[statChoice];
+		cin >> newValue;
+	}
+	
+	if (statChoice == LEVEL_ID)
+	{
+		ChangeLevel(newValue);
+	}
+	else
+	{
+		ModifyStat(statChoice, newValue);
+	}
+
+	return true;
+}
+
 void D2SaveEditor::ChoicePromptOutput(int& choice)
 {
 	cout << "What would you like to do now?" << endl
-		<< "1. Change Class" << endl
-		<< "2. Change Name" << endl
-		<< "3. Display Current Name" << endl
-		<< "4. Save to New File" << endl
-		<< "5. Read In a New File" << endl
-		<< "6. Change Level -> Doesn't quite work." << endl
-		<< "7. Quit" << endl;
+		<< CLASS_CHANGE_PROMPT << ". Change Class" << endl
+		<< CHANGE_NAME_PROMPT << ". Change Name" << endl
+		<< DISPLAY_NAME_PROMPT << ". Display Current Name" << endl
+		<< SAVE_TO_NEW_FILE_PROMPT << ". Save to New File" << endl
+		<< READ_NEW_FILE_PROMPT << ". Read In a New File" << endl
+		<< EDIT_STAT_PROMPT<< ". Edit Stats (including level, life, gold, etc)" << endl
+		<< DISP_STAT_PROMPT << ". Display all stats." << endl
+		<< QUIT_PROMPT << ". Quit" << endl;
 	cin >> choice;
 }
 
@@ -226,7 +294,7 @@ void D2SaveEditor::RunEditor(string& filePath)
 	{
 		int choice = 0;
 		ChoicePromptOutput(choice);
-		if (choice == 7)
+		if (choice == QUIT_PROMPT)
 		{
 			if (changesToSave)
 			{
@@ -235,6 +303,7 @@ void D2SaveEditor::RunEditor(string& filePath)
 			break;
 		}
 		DoDecision(choice, filePath);
+		cout << endl;
 	}
 }
 
@@ -324,11 +393,14 @@ bool D2SaveEditor::SaveToFile()
 		} while (!ChangeName(unsetName));
 	}
 #endif // !SKIP_ERROR_CHECK_SAVE
-	//AA
-	int startingIndex = currentFilePath.find_last_of('\\') + 1;
+	int startingIndex = currentFilePath.find_last_of('\\');
 	if (startingIndex == string::npos)
 	{
 		startingIndex = 0;
+	}
+	else
+	{
+		startingIndex++;
 	}
 	currentFilePath.replace(startingIndex, startingIndex + NAME_SIZE + EXTENSION_LENGTH, (string)(characterBuffer + NAME_START) + FILE_EXTENSION);
 	SetCheckSum();
@@ -346,7 +418,6 @@ bool D2SaveEditor::SaveToFile()
 
 	outputFile = NULL;
 	changesToSave = false;
-	FindStatsDisplay();
 	return true;
 }
 
@@ -354,36 +425,57 @@ bool D2SaveEditor::SaveToFile()
 // FF 5F -> 1111 1111 0101 1111 -> 1111 1111 ???1 1111 = 13 bits. Pretty sure the ? is part of a code identifying the stat. Least significant byte
 // first. Pretty sure it's 8 bits for  the stat id itself.
 // 5F 60 -> 0101 1111 0110 0000 -> ???1 1111 011? ???? -> the question marks are where the bits for the stat id are I think.
-// Actually, based on strength, I think it is 9 bit for the stat id.
+// Actually, based on strength, I think it is 9 bit for the stat id. It is 9 bit.
 // 00 FF FE
-// 11 Bytes for strength, energy, dexterity, and vitality.
+// 11 Bytes for strength, energy, dexterity, and vitality all together + their id.
 // Strength = 0
 // Energy = 1
 // Dexterity = 10
 // Vitality = 11
-// 00        FE        7F        80        FF        2F        E0        FF        0F        F8        FF -> every stat at cap of 8191.
+// 00        FE        7F        80        FF        2F        E0        FF        0F        F8        FF		-> every stat at cap of 8191.
 // 0000 0000 1111 1110 0111 1111 1000 0000 1111 1111 0010 1111 1110 0000 1111 1111 0000 1111 1111 1000 1111 1111
 // ???? ???? 1111 111? ??11 1111 1??? ???? 1111 1111 ???? 1111 111? ???? 1111 1111 ???? ??11 1111 1??? 1111 1111
-bool D2SaveEditor::FindStatsDisplay()
+
+//Finds the starting and ending index of the stats.
+bool D2SaveEditor::FindStats()
 {
-	int index = HEADER_SIZE;
-	for (; characterBuffer[index] != 'g' || characterBuffer[index + 1] != 'f'; index++)
+	if (characterBuffer == NULL)
+	{
+		return false;
+	}
+	statStartIndex = HEADER_SIZE;
+	for (; characterBuffer[statStartIndex] != 'g' || characterBuffer[statStartIndex + 1] != 'f'; statStartIndex++)
 	{
 
 	}
-	index += 2;
-	int maxIndex;
-	for (maxIndex = index; characterBuffer[maxIndex] != 'i' || characterBuffer[maxIndex + 1] != 'f'; maxIndex++)
+	statStartIndex += 2;
+	for (statEndIndex = statStartIndex; characterBuffer[statEndIndex] != 'i' || characterBuffer[statEndIndex + 1] != 'f'; statEndIndex++)
 	{
 
 	}
+	return true;
+}
+
+bool D2SaveEditor::DisplayStatsOrSeek(bool displayStats, unsigned int& statToSeek, int& bitShiftAtIndex)
+{
+	if (statStartIndex < HEADER_SIZE)
+	{
+		if (!FindStats())
+		{
+			return false;
+		}
+	}
+	int index = statStartIndex;
 	long long section = 0;
 	int shifted = 0;
-	// Assigns 1111 1111 0000 0000 0010 1111 1111 1111 1000 0000 0111 1111 1111 1110 0000 0000 -> Reverse order of above order.
-	section = *(long long*)(characterBuffer + index);
+	section = *(long long*)(characterBuffer + statStartIndex);
 	
-	for (int i = 0; i < 16 && index < maxIndex; i++)
+	for (int i = 0; i < NUMBER_OF_STATS && index < statEndIndex; i++)
 	{
+		if (displayStats)
+		{
+			cout << endl;
+		}
 		if (shifted > 8)
 		{
 			index += shifted / 8;
@@ -391,118 +483,74 @@ bool D2SaveEditor::FindStatsDisplay()
 			section = *(long long*)(characterBuffer + index);
 			section >>= shifted;
 		}
-		string outputString = "";
+
 		int shift = 0;
-		int idShift = STAT_ID_SIZE;
 		int characteristicMask = 0;
-		//This should be a dictionary.
-		switch (section & STAT_ID_MASK)
+		unsigned int statID = section & STAT_ID_MASK;
+		if (statID <= NUMBER_OF_STATS)
 		{
-			case 0:
-				outputString = "Strength: ";
-				break;
-			case 1:
-				outputString = "Energy: ";
-				break;
-			case 2:
-				outputString = "Dexterity: ";
-				break;
-			case 3:
-				outputString = "Vitality: ";
-				break;
-			case 4:
-				outputString = "Stat Points: ";
-				break;
-			case 5:
-				outputString = "Skill Points: ";
-				break;
-			case 6:
-				outputString = "Current Health: ";
-				break;
-			case 7:
-				outputString = "Base Maximum Health: ";
-				break;
-			case 8:
-				outputString = "Current Mana: ";
-				break;
-			case 9:
-				outputString = "Base Maximum Mana: ";
-				break;
-			case 10:
-				outputString = "Current Stamina: ";
-				break;
-			case 11:
-				outputString = "Base Maximum Stamina: ";
-			case 12:
-				outputString = "Level: ";
-				break;
-			case 13:
-				outputString = "Experience: ";
-				break;
-			case 14:
-				outputString = "Inventory Gold: ";
-				break;
-			case 15:
-				outputString = "Stash Gold: ";
-				break;
-			default:
-				break;
-		}
-		switch (section & STAT_ID_MASK)
-		{
-			case 1:
-			case 2:
-			case 3:
-			case 0:
-				characteristicMask = STAT_MASK;
-				shift = STAT_SIZE;
-				break;
-				//Stat Points. Stored as 11 bits.
-			case 4:
-				characteristicMask = STAT_POINT_MASK;
-				shift = STAT_POINT_SIZE;
-				break;
-			case 5:
-				characteristicMask = SKILL_POINT_MASK;
-				shift = SKILL_POINT_SIZE;
-				break;
-			case 11:
-			case 10:
-			case 9:
-			case 8:
-			case 7:
-			case 6:
-				//This is a fixed point number for some reason. It has 8 practically pointless bits, so they are removed.
-				characteristicMask = CURRENT_HEALTH_MASK >> 8;
-				shift = CURRENT_HEALTH_SIZE - 8;
-				section >>= 8;
-				shifted += 8;
-				break;
-			case 12:
-				characteristicMask = LEVEL_MASK;
-				shift = LEVEL_SIZE;
-				break;
-			case 13:
-				characteristicMask = EXPERIENCE_MASK;
-				shift = EXPERIENCE_SIZE;
-				break;
-			case 15:
-			case 14:
-				characteristicMask = GOLD_MASK;
-				shift = GOLD_SIZE;
-				break;
-		default:
-			break;
-		}
-		if (outputString != "")
-		{
-			section >>= idShift;
-			shifted += idShift;
-			cout << outputString << (section & characteristicMask) << "    Index: " << index << "     Shifted: " << shifted << endl;
+			switch (statID)
+			{
+				case ENERGY_ID:
+				case DEXTERITY_ID:
+				case VITALITY_ID:
+				case STRENGTH_ID:
+					//Strength, Energy, Dexterity, Vitality. Stored as 13 bits each.
+					characteristicMask = STAT_MASK;
+					shift = STAT_SIZE;
+					break;
+					//Stat Points. Stored as 11 bits.
+				case STAT_POINTS_ID:
+					characteristicMask = STAT_POINT_MASK;
+					shift = STAT_POINT_SIZE;
+					break;
+				case SKILL_POINTS_ID:
+					characteristicMask = SKILL_POINT_MASK;
+					shift = SKILL_POINT_SIZE;
+					break;
+				case BASE_MAX_STAMINA_ID:
+				case CURRENT_STAMINA_ID:
+				case BASE_MAX_MANA_ID:
+				case CURRENT_MANA_ID:
+				case BASE_MAX_HEALTH_ID:
+				case CURRENT_HEALTH_ID:
+					//This is a fixed point number for some reason. It has 8 practically pointless bits, so they are removed.
+					characteristicMask = CURRENT_HEALTH_MASK >> 8;
+					shift = CURRENT_HEALTH_SIZE - 8;
+					section >>= 8;
+					shifted += 8;
+					break;
+				case LEVEL_ID:
+					characteristicMask = LEVEL_MASK;
+					shift = LEVEL_SIZE;
+					break;
+				case EXPERIENCE_ID:
+					characteristicMask = EXPERIENCE_MASK;
+					shift = EXPERIENCE_SIZE;
+					break;
+				case STASH_GOLD_ID:
+				case INVENTORY_GOLD_ID:
+					characteristicMask = GOLD_MASK;
+					shift = GOLD_SIZE;
+					break;
+				default:
+					break;
+			}
+			section >>= STAT_ID_SIZE;
+			shifted += STAT_ID_SIZE;
+			if (displayStats)
+			{
+				cout << (statIdToString[statID]) << (section & characteristicMask) << endl;
+			}
+			else if(statToSeek == statID)
+			{
+				statToSeek = index;
+				bitShiftAtIndex = shifted;
+				return true;
+			}
 			section >>= shift;
 			shifted += shift;
 		}
 	}
-
 	return true;
 }

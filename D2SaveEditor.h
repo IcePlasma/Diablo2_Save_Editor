@@ -3,6 +3,7 @@
 #define NAME_SIZE 15
 #define NAME_START 20
 #define HEADER_SIZE 765
+#define NUMBER_OF_STATS 16
 #define STAT_ID_SIZE 9
 #define STAT_ID_MASK 511
 #define STAT_SIZE 13
@@ -17,11 +18,12 @@
 #define SKILL_POINT_MASK 511
 #define CURRENT_HEALTH_MASK 0x1FFFFF
 #define LEVEL_MASK 0xFF
-#define EXPERIENCE_MASK 0xFFFFFFFF
+#define EXPERIENCE_MASK 0xFFFFFF
 #define GOLD_MASK 0x1FFFFFF
 #define CHECKSUM_INDEX 12
 #define CLASS_INDEX 40
 #define LEVEL_INDEX 43
+
 #define AMAZON 0
 #define SORCERESS 1
 #define NECROMANCER 2
@@ -29,15 +31,42 @@
 #define BARBARIAN 4
 #define DRUID 5
 #define ASSASSIN 6
+
 #define EXTENSION_LENGTH 4
 #define FILE_EXTENSION ".d2s"
 #define MINIMUM_FILE_LENGTH 6
 #define MAXIMUM_LEVEL 150
-#define LEVEL_INDEX 43
+
+#define CLASS_CHANGE_PROMPT 1
+#define CHANGE_NAME_PROMPT 2
+#define DISPLAY_NAME_PROMPT 3
+#define SAVE_TO_NEW_FILE_PROMPT 4
+#define READ_NEW_FILE_PROMPT 5
+#define EDIT_STAT_PROMPT 6
+#define DISP_STAT_PROMPT 7
+#define QUIT_PROMPT 8
+
+#define STRENGTH_ID 0
+#define ENERGY_ID 1
+#define DEXTERITY_ID 2
+#define VITALITY_ID 3
+#define STAT_POINTS_ID 4
+#define SKILL_POINTS_ID 5
+#define CURRENT_HEALTH_ID 6
+#define BASE_MAX_HEALTH_ID 7
+#define CURRENT_MANA_ID 8
+#define BASE_MAX_MANA_ID 9
+#define CURRENT_STAMINA_ID 10
+#define BASE_MAX_STAMINA_ID 11
+#define LEVEL_ID 12
+#define EXPERIENCE_ID 13
+#define INVENTORY_GOLD_ID 14
+#define STASH_GOLD_ID 15
 #include <Windows.h>
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 using namespace std;
 
 // A basic save editor for .d2s (Diablo 2 save) files. Supports changing classes, name, and level
@@ -82,9 +111,50 @@ private:
 		10292636, 10504370, 10734423, 10987094, 11267753, 
 		11267753, 11941504, 12353407
 	};
+	const long long statIDToMask[16] =
+	{
+		STAT_MASK,
+		STAT_MASK,
+		STAT_MASK,
+		STAT_MASK,
+		STAT_POINT_MASK,
+		SKILL_POINT_MASK,
+		CURRENT_HEALTH_MASK,
+		CURRENT_HEALTH_MASK,
+		CURRENT_HEALTH_MASK,
+		CURRENT_HEALTH_MASK,
+		CURRENT_HEALTH_MASK,
+		CURRENT_HEALTH_MASK,
+		LEVEL_MASK,
+		EXPERIENCE_MASK,
+		GOLD_MASK,
+		GOLD_MASK
+	};
 	bool nameChanged;
 	bool changesToSave;
-	bool FindStatsDisplay();
+	int statStartIndex;
+	int statEndIndex;
+	const string statIdToString[NUMBER_OF_STATS] =
+	{
+		"Strength: ",
+		"Energy: ",
+		"Dexterity: ",
+		"Vitality: ",
+		"Stat Points: ",
+		"Skill Points: ",
+		"Current Health: ",
+		"Base Maximum Health: ",
+		"Current Mana: ",
+		"Base Maximum Mana: ",
+		"Current Stamina: ",
+		"Base Maximum Stamina: ",
+		"Level: ",
+		"Experience: ",
+		"Inventory Gold: ",
+		"Stash Gold: "
+	};
+	void ResetDefaults();
+	bool DisplayStatsOrSeek(bool, unsigned int&, int&);
 	bool ReadFile(string&);
 	bool ChangeName(string&);
 	bool ChangeClass(unsigned int);
@@ -95,6 +165,9 @@ private:
 	void SetCheckSum();
 	void SavePrompt();
 	void ChoicePrompts(int&);
+	void ModifyStat(int, int);
+	bool FindStats();
+	bool ChangeStat(int);
 };
 
 #endif
